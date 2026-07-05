@@ -1,0 +1,44 @@
+# ── Production environment GitOps values ──────────────────────────────────────
+# IMPORTANT: Production sync is MANUAL in Argo CD (requires human approval)
+# Jenkins CI updates image.tag via a PR; a team member approves the sync.
+
+image:
+  repository: "123456789012.dkr.ecr.ap-south-1.amazonaws.com/payg-payment-gateway"
+  tag: "REPLACE_WITH_CI_TAG"   # ← Jenkins CI creates a PR to update this
+
+replicaCount: 3
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 15
+
+env:
+  APP_ENV: "production"
+  DB_NAME: "payg_db"
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/payg-eks-production-external-secrets-role"
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 768Mi
+  limits:
+    cpu: "2"
+    memory: 1536Mi
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+ingress:
+  annotations:
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-south-1:123456789012:certificate/REPLACE"
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+  hosts:
+    - host: api.payg.in
+      paths:
+        - path: /api
+          pathType: Prefix

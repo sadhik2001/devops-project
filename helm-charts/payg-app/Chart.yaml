@@ -1,0 +1,18 @@
+apiVersion: v2
+name: payg-app
+description: PayG Plus – Payment Gateway Service Helm Chart
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - payment
+  - fintech
+  - spring-boot
+  - eks
+
+maintainers:
+  - name: DevOps Team
+    email: devops@payg.internal
+
+dependencies: []

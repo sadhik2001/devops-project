@@ -1,0 +1,4 @@
+sonarqube_version: "10.4.1.88267"
+sonarqube_port: 9000
+sonarqube_db_name: sonarqube
+# sonarqube_db_password: defined in vault or --extra-vars

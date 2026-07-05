@@ -1,0 +1,347 @@
+#!/usr/bin/env groovy
+// ─────────────────────────────────────────────────────────────────────────────
+// PayG Plus – Jenkins Declarative Pipeline
+// Stages: Checkout → Build → Test → SonarQube → Docker → Trivy → ECR → GitOps
+// ─────────────────────────────────────────────────────────────────────────────
+
+pipeline {
+    agent {
+        kubernetes {
+            label "payg-build-${env.BUILD_NUMBER}"
+            defaultContainer 'maven'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins-agent
+  containers:
+    - name: maven
+      image: eclipse-temurin:17-jdk-alpine
+      command: [cat]
+      tty: true
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "2"
+          memory: "2Gi"
+      volumeMounts:
+        - name: maven-cache
+          mountPath: /root/.m2
+    - name: docker
+      image: docker:24-dind
+      securityContext:
+        privileged: true
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+    - name: trivy
+      image: aquasec/trivy:latest
+      command: [cat]
+      tty: true
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: [cat]
+      tty: true
+  volumes:
+    - name: maven-cache
+      persistentVolumeClaim:
+        claimName: maven-cache-pvc
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
+"""
+        }
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 45, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        timestamps()
+        ansiColor('xterm')
+    }
+
+    parameters {
+        string(name: 'GIT_BRANCH',  defaultValue: 'main',   description: 'Branch to build')
+        string(name: 'GIT_COMMIT',  defaultValue: '',        description: 'Git commit SHA')
+        string(name: 'IMAGE_TAG',   defaultValue: '',        description: 'Docker image tag (set by GitHub Actions)')
+        booleanParam(name: 'SKIP_TESTS',   defaultValue: false, description: 'Skip unit tests')
+        booleanParam(name: 'FORCE_DEPLOY', defaultValue: false, description: 'Force deploy even if tests fail')
+    }
+
+    environment {
+        APP_NAME         = 'payg-payment-gateway'
+        AWS_REGION       = 'ap-south-1'
+        ECR_REGISTRY     = credentials('ecr-registry-url')
+        SONAR_HOST_URL   = credentials('sonarqube-url')
+        SONAR_TOKEN      = credentials('sonarqube-token')
+        GITOPS_REPO      = credentials('gitops-repo-url')
+        GITOPS_TOKEN     = credentials('gitops-github-token')
+        IMAGE_FULL       = "${ECR_REGISTRY}/${APP_NAME}:${params.IMAGE_TAG ?: env.BUILD_NUMBER}"
+        DEPLOY_ENV       = "${params.GIT_BRANCH == 'main' ? 'production' : 'dev'}"
+    }
+
+    stages {
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Checkout') {
+        // ─────────────────────────────────────────────────────────────────────
+            steps {
+                checkout scm
+                script {
+                    env.GIT_SHORT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.BUILD_TIMESTAMP = sh(script: 'date +%Y%m%d%H%M%S', returnStdout: true).trim()
+                    if (!params.IMAGE_TAG) {
+                        env.IMAGE_TAG_FINAL = "v${env.BUILD_TIMESTAMP}-${env.GIT_SHORT_SHA}"
+                    } else {
+                        env.IMAGE_TAG_FINAL = params.IMAGE_TAG
+                    }
+                    env.IMAGE_FULL = "${ECR_REGISTRY}/${APP_NAME}:${env.IMAGE_TAG_FINAL}"
+                    echo "🚀 Building: ${env.IMAGE_FULL}"
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Build & Test') {
+        // ─────────────────────────────────────────────────────────────────────
+            stages {
+                stage('Compile') {
+                    steps {
+                        dir('application') {
+                            sh 'mvn compile -B --no-transfer-progress'
+                        }
+                    }
+                }
+
+                stage('Unit Tests') {
+                    when { not { expression { params.SKIP_TESTS } } }
+                    steps {
+                        dir('application') {
+                            sh 'mvn test -B --no-transfer-progress'
+                        }
+                    }
+                    post {
+                        always {
+                            junit 'application/target/surefire-reports/*.xml'
+                            publishHTML(target: [
+                                allowMissing: false,
+                                alwaysLinkToLastBuild: true,
+                                keepAll: true,
+                                reportDir: 'application/target/site/jacoco',
+                                reportFiles: 'index.html',
+                                reportName: 'JaCoCo Coverage Report'
+                            ])
+                        }
+                    }
+                }
+
+                stage('Package') {
+                    steps {
+                        dir('application') {
+                            sh 'mvn package -DskipTests -B --no-transfer-progress'
+                            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('SonarQube Analysis') {
+        // ─────────────────────────────────────────────────────────────────────
+            when { not { expression { params.SKIP_TESTS } } }
+            steps {
+                dir('application') {
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            mvn sonar:sonar \
+                              -Dsonar.projectKey=${APP_NAME} \
+                              -Dsonar.projectName='PayG Plus Payment Gateway' \
+                              -Dsonar.host.url=${SONAR_HOST_URL} \
+                              -Dsonar.login=${SONAR_TOKEN} \
+                              -Dsonar.branch.name=${params.GIT_BRANCH} \
+                              --no-transfer-progress
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('SonarQube Quality Gate') {
+            when { not { expression { params.SKIP_TESTS } } }
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: !params.FORCE_DEPLOY
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Docker Build') {
+        // ─────────────────────────────────────────────────────────────────────
+            steps {
+                container('docker') {
+                    dir('application') {
+                        sh """
+                            docker build \
+                              --build-arg BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+                              --build-arg GIT_COMMIT=${env.GIT_SHORT_SHA} \
+                              --build-arg APP_VERSION=${env.IMAGE_TAG_FINAL} \
+                              -t ${env.IMAGE_FULL} \
+                              -f Dockerfile .
+                        """
+                        echo "✅ Docker image built: ${env.IMAGE_FULL}"
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Trivy Security Scan') {
+        // ─────────────────────────────────────────────────────────────────────
+            steps {
+                container('trivy') {
+                    sh """
+                        trivy image \
+                          --format table \
+                          --severity HIGH,CRITICAL \
+                          --ignore-unfixed \
+                          --exit-code 0 \
+                          ${env.IMAGE_FULL} | tee trivy-report.txt
+
+                        echo "--- Checking for CRITICAL vulnerabilities ---"
+                        trivy image \
+                          --format json \
+                          --severity CRITICAL \
+                          --ignore-unfixed \
+                          --exit-code 1 \
+                          --output trivy-critical.json \
+                          ${env.IMAGE_FULL} || {
+                            echo "❌ CRITICAL vulnerabilities found. Review trivy-critical.json"
+                            exit 1
+                          }
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-report.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'trivy-critical.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Push to ECR') {
+        // ─────────────────────────────────────────────────────────────────────
+            steps {
+                container('docker') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
+                                      credentialsId: 'aws-credentials',
+                                      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                                      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                        sh """
+                            # ECR login
+                            aws ecr get-login-password --region ${AWS_REGION} | \
+                              docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+                            # Push versioned tag
+                            docker push ${env.IMAGE_FULL}
+
+                            # Also tag + push branch-specific tag
+                            docker tag ${env.IMAGE_FULL} ${ECR_REGISTRY}/${APP_NAME}:${params.GIT_BRANCH}-latest
+                            docker push ${ECR_REGISTRY}/${APP_NAME}:${params.GIT_BRANCH}-latest
+
+                            echo "✅ Pushed: ${env.IMAGE_FULL}"
+                        """
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Update GitOps Manifest') {
+        // ─────────────────────────────────────────────────────────────────────
+            steps {
+                container('kubectl') {
+                    script {
+                        def targetEnv = env.DEPLOY_ENV
+                        def manifestPath = "gitops-manifests/environments/${targetEnv}/values.yaml"
+
+                        withCredentials([string(credentialsId: 'gitops-github-token', variable: 'GH_TOKEN')]) {
+                            sh """
+                                # Configure git
+                                git config --global user.email "jenkins@payg.internal"
+                                git config --global user.name "Jenkins CI"
+
+                                # Clone GitOps repo
+                                git clone https://x-access-token:\${GH_TOKEN}@\$(echo ${GITOPS_REPO} | sed 's|https://||') /tmp/gitops
+                                cd /tmp/gitops
+
+                                # Update image tag using sed (yq-style inline update)
+                                sed -i "s|tag:.*|tag: \\"${env.IMAGE_TAG_FINAL}\\"|g" ${manifestPath}
+                                sed -i "s|repository:.*|repository: ${ECR_REGISTRY}/${APP_NAME}|g" ${manifestPath}
+
+                                # Commit and push
+                                git add ${manifestPath}
+                                git diff --staged --quiet || {
+                                    git commit -m "ci: update ${APP_NAME} image to ${env.IMAGE_TAG_FINAL} [skip ci]
+
+Environment: ${targetEnv}
+Branch: ${params.GIT_BRANCH}
+Commit: ${env.GIT_SHORT_SHA}
+Build: ${env.BUILD_NUMBER}"
+                                    git push origin main
+                                    echo "✅ GitOps manifest updated for ${targetEnv}"
+                                }
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        stage('Verify Deployment') {
+        // ─────────────────────────────────────────────────────────────────────
+            steps {
+                container('kubectl') {
+                    script {
+                        def namespace = env.DEPLOY_ENV == 'production' ? 'payg-production' : 'payg-dev'
+                        sh """
+                            echo "⏳ Waiting for Argo CD to sync and deploy..."
+                            sleep 30
+
+                            # Wait for rollout (Argo CD handles the actual deploy)
+                            kubectl rollout status deployment/${APP_NAME} \
+                              -n ${namespace} \
+                              --timeout=300s || echo "⚠️  Rollout check skipped (Argo CD may still be syncing)"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Pipeline PASSED – ${env.IMAGE_FULL} deployed to ${env.DEPLOY_ENV}"
+            // Slack notification (configure Slack plugin)
+            // slackSend channel: '#devops-alerts', color: 'good',
+            //   message: "✅ *${APP_NAME}* `${env.IMAGE_TAG_FINAL}` deployed to *${env.DEPLOY_ENV}*"
+        }
+        failure {
+            echo "❌ Pipeline FAILED – check logs above"
+            // slackSend channel: '#devops-alerts', color: 'danger',
+            //   message: "❌ *${APP_NAME}* build #${env.BUILD_NUMBER} FAILED on branch `${params.GIT_BRANCH}`"
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

@@ -1,0 +1,133 @@
+---
+# SonarQube installation tasks
+# Tested on: Amazon Linux 2023 / RHEL 8
+
+- name: Install Java 17
+  ansible.builtin.dnf:
+    name: java-17-amazon-corretto
+    state: present
+  become: true
+
+- name: Install PostgreSQL client
+  ansible.builtin.dnf:
+    name:
+      - postgresql15
+      - postgresql15-server
+    state: present
+  become: true
+
+- name: Initialize PostgreSQL
+  ansible.builtin.command: postgresql-setup --initdb
+  args:
+    creates: /var/lib/pgsql/data/PG_VERSION
+  become: true
+
+- name: Start and enable PostgreSQL
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+  become: true
+
+- name: Create SonarQube database user
+  ansible.builtin.shell: |
+    psql -c "CREATE USER sonarqube WITH PASSWORD '{{ sonarqube_db_password }}';" || true
+    psql -c "CREATE DATABASE {{ sonarqube_db_name }} OWNER sonarqube;" || true
+  become: true
+  become_user: postgres
+
+- name: Create sonarqube system user
+  ansible.builtin.user:
+    name: sonarqube
+    system: true
+    shell: /bin/false
+    home: /opt/sonarqube
+  become: true
+
+- name: Download SonarQube {{ sonarqube_version }}
+  ansible.builtin.get_url:
+    url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonarqube_version }}.zip"
+    dest: /tmp/sonarqube.zip
+    mode: '0644'
+
+- name: Unzip SonarQube
+  ansible.builtin.unarchive:
+    src: /tmp/sonarqube.zip
+    dest: /opt/
+    remote_src: true
+    creates: "/opt/sonarqube-{{ sonarqube_version }}"
+  become: true
+
+- name: Create /opt/sonarqube symlink
+  ansible.builtin.file:
+    src: "/opt/sonarqube-{{ sonarqube_version }}"
+    dest: /opt/sonarqube
+    state: link
+    force: true
+  become: true
+
+- name: Set SonarQube ownership
+  ansible.builtin.file:
+    path: /opt/sonarqube
+    owner: sonarqube
+    group: sonarqube
+    recurse: true
+    follow: false
+  become: true
+
+- name: Configure SonarQube properties
+  ansible.builtin.template:
+    src: sonar.properties.j2
+    dest: /opt/sonarqube/conf/sonar.properties
+    owner: sonarqube
+    group: sonarqube
+    mode: '0640'
+  become: true
+  notify: Restart SonarQube
+
+- name: Set kernel parameters for Elasticsearch (SonarQube req)
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+  loop:
+    - { key: vm.max_map_count, value: "524288" }
+    - { key: fs.file-max, value: "131072" }
+  become: true
+
+- name: Set ulimits for sonarqube user
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.d/sonarqube.conf
+    line: "{{ item }}"
+    create: true
+  loop:
+    - "sonarqube - nofile 131072"
+    - "sonarqube - nproc  8192"
+  become: true
+
+- name: Install SonarQube systemd service
+  ansible.builtin.template:
+    src: sonarqube.service.j2
+    dest: /etc/systemd/system/sonarqube.service
+    mode: '0644'
+  become: true
+  notify: Restart SonarQube
+
+- name: Start and enable SonarQube service
+  ansible.builtin.systemd:
+    name: sonarqube
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Wait for SonarQube to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:{{ sonarqube_port }}/api/system/status"
+    status_code: 200
+    return_content: true
+  register: sonar_status
+  until: "'UP' in sonar_status.content"
+  retries: 30
+  delay: 15

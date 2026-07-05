@@ -1,0 +1,19 @@
+# Common variables for all hosts
+aws_region: ap-south-1
+java_version: "17"
+domain: payg.internal
+
+# Jenkins config
+jenkins_version: "2.452.1"
+jenkins_http_port: 8080
+jenkins_admin_user: admin
+# jenkins_admin_password: set via --extra-vars or Ansible Vault
+
+# SonarQube config
+sonarqube_version: "10.4.1.88267"
+sonarqube_port: 9000
+sonarqube_db_name: sonarqube
+# sonarqube_db_password: set via --extra-vars or Ansible Vault
+
+# Docker
+docker_version: "25.0"

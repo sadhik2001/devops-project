@@ -1,0 +1,38 @@
+# ── Dev environment GitOps values ─────────────────────────────────────────────
+# This file is updated automatically by the Jenkins CI pipeline
+# DO NOT edit image.tag manually – it is managed by CI
+
+image:
+  repository: "123456789012.dkr.ecr.ap-south-1.amazonaws.com/payg-payment-gateway"
+  tag: "latest"   # ← Jenkins CI updates this value on every successful build
+
+replicaCount: 1
+
+autoscaling:
+  enabled: false
+
+env:
+  APP_ENV: "dev"
+  DB_NAME: "payg_db_dev"
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/payg-eks-dev-external-secrets-role"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podDisruptionBudget:
+  enabled: false
+
+ingress:
+  hosts:
+    - host: api-dev.payg.internal
+      paths:
+        - path: /api
+          pathType: Prefix

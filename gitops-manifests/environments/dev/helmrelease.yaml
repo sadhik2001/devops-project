@@ -1,0 +1,33 @@
+# HelmRelease-style manifest that Argo CD reads to deploy via Helm
+# Note: With Argo CD "helm source", this is represented as an Application
+# pointing to the helm-charts repo with valueFiles override.
+# This file documents the configuration for reference.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payg-payment-gateway-dev-helm
+  namespace: argocd
+spec:
+  project: payg-platform
+  source:
+    repoURL: https://github.com/YOUR_ORG/helm-charts.git
+    targetRevision: main
+    path: payg-app
+    helm:
+      releaseName: payg-payment-gateway
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+      # Override image tag from gitops-manifests (injected by Jenkins)
+      parameters:
+        - name: image.tag
+          value: "latest"   # Jenkins CI overrides this
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payg-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

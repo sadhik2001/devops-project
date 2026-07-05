@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: payg-platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "PayG Plus Platform – all environments"
+
+  sourceRepos:
+    - https://github.com/YOUR_ORG/gitops-manifests.git
+    - https://github.com/YOUR_ORG/helm-charts.git
+
+  destinations:
+    - namespace: payg-dev
+      server: https://kubernetes.default.svc
+    - namespace: payg-production
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  orphanedResources:
+    warn: true

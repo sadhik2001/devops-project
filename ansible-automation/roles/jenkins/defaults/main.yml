@@ -1,0 +1,18 @@
+jenkins_plugins:
+  - git
+  - github
+  - github-branch-source
+  - workflow-aggregator
+  - pipeline-stage-view
+  - blueocean
+  - kubernetes
+  - docker-workflow
+  - sonar
+  - jacoco
+  - ansicolor
+  - build-timeout
+  - credentials-binding
+  - timestamper
+  - ws-cleanup
+  - slack
+  - configuration-as-code

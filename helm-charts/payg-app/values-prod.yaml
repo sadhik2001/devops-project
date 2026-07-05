@@ -1,0 +1,68 @@
+image:
+  repository: "123456789012.dkr.ecr.ap-south-1.amazonaws.com/payg-payment-gateway"
+  tag: "REPLACE_WITH_CI_TAG"   # Updated by Jenkins CI pipeline
+
+replicaCount: 3
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 15
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 75
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-south-1:123456789012:certificate/REPLACE"
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+  hosts:
+    - host: api.payg.in
+      paths:
+        - path: /api
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 768Mi
+  limits:
+    cpu: "2"
+    memory: 1536Mi
+
+env:
+  APP_ENV: "production"
+  SERVER_PORT: "8080"
+  DB_PORT: "5432"
+  DB_NAME: "payg_db"
+
+externalSecret:
+  enabled: true
+  refreshInterval: 5m
+  data:
+    - secretKey: DB_HOST
+      remoteRef:
+        key: payg/production/db
+        property: host
+    - secretKey: DB_USERNAME
+      remoteRef:
+        key: payg/production/db
+        property: username
+    - secretKey: DB_PASSWORD
+      remoteRef:
+        key: payg/production/db
+        property: password
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/payg-eks-production-external-secrets-role"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

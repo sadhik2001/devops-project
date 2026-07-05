@@ -1,0 +1,56 @@
+---
+# PayG Plus – Master Ansible playbook
+# Usage:
+#   ansible-playbook playbooks/site.yml -i inventory/hosts.ini --ask-vault-pass
+#   ansible-playbook playbooks/site.yml -i inventory/hosts.ini --tags jenkins
+#   ansible-playbook playbooks/site.yml -i inventory/hosts.ini --tags sonarqube
+
+- name: Configure all DevOps servers
+  hosts: all
+  gather_facts: true
+  become: true
+  pre_tasks:
+    - name: Update all packages
+      ansible.builtin.dnf:
+        name: '*'
+        state: latest
+        update_cache: true
+
+    - name: Install common utilities
+      ansible.builtin.dnf:
+        name:
+          - git
+          - curl
+          - wget
+          - unzip
+          - vim
+          - htop
+          - jq
+          - awscli
+        state: present
+
+    - name: Configure AWS CLI region
+      ansible.builtin.lineinfile:
+        path: /home/ec2-user/.bashrc
+        line: "export AWS_DEFAULT_REGION={{ aws_region }}"
+        create: true
+
+- name: Provision Jenkins server
+  hosts: jenkins
+  gather_facts: true
+  become: true
+  tags: [jenkins]
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/all.yml"
+  roles:
+    - role: jenkins
+
+- name: Provision SonarQube server
+  hosts: sonarqube
+  gather_facts: true
+  become: true
+  tags: [sonarqube]
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/all.yml"
+  roles:
+    - role: sonarqube

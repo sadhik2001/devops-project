@@ -1,0 +1,49 @@
+name: CI Build – Notify Jenkins
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  trigger-jenkins:
+    name: Trigger Jenkins Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate build metadata
+        id: meta
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          IMAGE_TAG="v${TIMESTAMP}-${SHORT_SHA}"
+          BRANCH="${GITHUB_REF_NAME}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "📦 Image tag will be: ${IMAGE_TAG}"
+
+      - name: Trigger Jenkins pipeline
+        run: |
+          curl -f -X POST \
+            "${{ secrets.JENKINS_URL }}/job/payg-payment-gateway/buildWithParameters" \
+            --user "${{ secrets.JENKINS_USER }}:${{ secrets.JENKINS_API_TOKEN }}" \
+            --data-urlencode "GIT_BRANCH=${{ steps.meta.outputs.branch }}" \
+            --data-urlencode "GIT_COMMIT=${{ github.sha }}" \
+            --data-urlencode "IMAGE_TAG=${{ steps.meta.outputs.image_tag }}" \
+            --data-urlencode "PR_NUMBER=${{ github.event.pull_request.number || '' }}"
+          echo "✅ Jenkins build triggered for tag: ${{ steps.meta.outputs.image_tag }}"
+
+      - name: Summary
+        run: |
+          echo "### 🚀 Jenkins Build Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`${{ steps.meta.outputs.branch }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ steps.meta.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`${{ steps.meta.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY

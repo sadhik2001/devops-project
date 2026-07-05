@@ -1,0 +1,24 @@
+# SonarQube configuration – managed by Ansible
+# Generated for PayG Plus DevOps Platform
+
+# ── Database ────────────────────────────────────────────────────────────────
+sonar.jdbc.username={{ sonarqube_db_name }}
+sonar.jdbc.password={{ sonarqube_db_password }}
+sonar.jdbc.url=jdbc:postgresql://localhost/{{ sonarqube_db_name }}
+
+# ── Web ──────────────────────────────────────────────────────────────────────
+sonar.web.host=0.0.0.0
+sonar.web.port={{ sonarqube_port }}
+sonar.web.context=/
+
+# ── Elasticsearch ────────────────────────────────────────────────────────────
+sonar.search.javaOpts=-Xmx512m -Xms512m -XX:+HeapDumpOnOutOfMemoryError
+
+# ── Security ─────────────────────────────────────────────────────────────────
+sonar.forceAuthentication=true
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+sonar.log.level=INFO
+sonar.path.logs=logs
+sonar.path.data=data
+sonar.path.temp=temp

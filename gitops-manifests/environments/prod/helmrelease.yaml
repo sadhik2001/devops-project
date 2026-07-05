@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payg-payment-gateway-prod-helm
+  namespace: argocd
+spec:
+  project: payg-platform
+  source:
+    repoURL: https://github.com/YOUR_ORG/helm-charts.git
+    targetRevision: main
+    path: payg-app
+    helm:
+      releaseName: payg-payment-gateway
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+      parameters:
+        - name: image.tag
+          value: "REPLACE_WITH_CI_TAG"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payg-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - Validate=true
