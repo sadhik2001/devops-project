@@ -115,7 +115,7 @@ graph TB
 
 ---
 
-## Quick Start – Day 1
+## Quick Start – 1
 
 ### Prerequisites
 
