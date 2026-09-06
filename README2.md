@@ -88,7 +88,7 @@ graph TB
 
 ---
 
-## Day 1 – What's in this phase
+##  1 – What's in this phase
 
 - [x] Spring Boot Payment Gateway application (REST API, JPA, Prometheus metrics)
 - [x] Multi-stage Dockerfile (non-root user, JVM container tuning)
@@ -96,7 +96,7 @@ graph TB
 - [x] Dev environment Terraform root module
 - [x] DevOps utility scripts
 
-## Day 2 – Coming next
+##  2 – Coming next
 
 - [ ] GitHub Actions – PR validation workflow (Trivy + SonarQube)
 - [ ] Jenkinsfile – Declarative build/push/deploy pipeline
@@ -105,7 +105,7 @@ graph TB
 - [ ] GitOps manifests – dev/prod overlays
 - [ ] Ansible playbooks – Jenkins + SonarQube provisioning
 
-## Day 3 – Final phase
+## 3 – Final phase
 
 - [ ] kube-prometheus-stack Helm values
 - [ ] Grafana dashboard JSON (JVM + EKS cluster)
